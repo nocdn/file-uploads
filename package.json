@@ -1,0 +1,86 @@
+{
+  "$schema": "https://www.raycast.com/schemas/extension.json",
+  "name": "file-uploads",
+  "title": "File Uploads",
+  "description": "Manages uploaded files in a r2 bucket.",
+  "icon": "extension-icon.png",
+  "author": "nocdn",
+  "platforms": [
+    "macOS",
+    "Windows"
+  ],
+  "categories": [
+    "Data"
+  ],
+  "license": "MIT",
+  "commands": [
+    {
+      "name": "files",
+      "title": "List Files",
+      "subtitle": "List and manage files in the bucket",
+      "description": "List files in a Cloudflare R2 bucket",
+      "mode": "view"
+    },
+    {
+      "name": "upload-file",
+      "title": "Upload File",
+      "subtitle": "Upload the selected file in Finder",
+      "description": "Upload the selected Finder file to a Cloudflare R2 bucket",
+      "mode": "view"
+    }
+  ],
+  "preferences": [
+    {
+      "name": "endpoint",
+      "type": "textfield",
+      "required": true,
+      "title": "R2 S3 API Endpoint",
+      "description": "Your R2 S3 API endpoint without the bucket path, for example https://<ACCOUNT_ID>.r2.cloudflarestorage.com",
+      "placeholder": "https://accountId.r2.cloudflarestorage.com"
+    },
+    {
+      "name": "accessKeyId",
+      "type": "textfield",
+      "required": true,
+      "title": "Access Key ID",
+      "description": "The Access Key ID generated from Cloudflare R2 API tokens"
+    },
+    {
+      "name": "secretAccessKey",
+      "type": "password",
+      "required": true,
+      "title": "Secret Access Key",
+      "description": "The Secret Access Key generated from Cloudflare R2 API tokens"
+    },
+    {
+      "name": "bucket",
+      "type": "textfield",
+      "required": true,
+      "title": "Bucket",
+      "description": "The R2 bucket name to list",
+      "placeholder": "my-bucket"
+    }
+  ],
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.830.0",
+    "@aws-sdk/lib-storage": "^3.830.0",
+    "@raycast/api": "^1.104.17",
+    "@raycast/utils": "^1.17.0"
+  },
+  "devDependencies": {
+    "@raycast/eslint-config": "^2.0.4",
+    "@types/node": "22.19.17",
+    "@types/react": "19.0.10",
+    "eslint": "^9.22.0",
+    "prettier": "^3.5.3",
+    "typescript": "^5.8.2"
+  },
+  "scripts": {
+    "build": "ray build",
+    "dev": "ray develop",
+    "fix-lint": "ray lint --fix",
+    "lint": "ray lint",
+    "prepublishOnly": "echo \"\\n\\nIt seems like you are trying to publish the Raycast extension to npm.\\n\\nIf you did intend to publish it to npm, remove the \\`prepublishOnly\\` script and rerun \\`npm publish\\` again.\\nIf you wanted to publish it to the Raycast Store instead, use \\`npm run publish\\` instead.\\n\\n\" && exit 1",
+    "publish": "npx @raycast/api@latest publish"
+  }
+}

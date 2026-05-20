@@ -1,4 +1,4 @@
-import { Action, ActionPanel, Clipboard, Form, Toast, getSelectedFinderItems, showToast } from "@raycast/api";
+import { Action, ActionPanel, Clipboard, Detail, Form, Toast, getSelectedFinderItems, showToast } from "@raycast/api";
 import { Upload } from "@aws-sdk/lib-storage";
 import { basename } from "node:path";
 import { createReadStream } from "node:fs";
@@ -9,6 +9,14 @@ import { getR2Config } from "./r2";
 
 type FormValues = {
   files: string[];
+};
+
+type UploadMode = "checking" | "manual" | "uploading" | "done";
+type UploadSource = "Finder" | "Clipboard" | "File Picker";
+
+type InitialUpload = {
+  path: string;
+  source: UploadSource;
 };
 
 function getErrorMessage(error: unknown) {
@@ -54,17 +62,22 @@ async function validateFilePath(path: string) {
   return { path: normalizedPath, size: fileStats.size };
 }
 
-async function uploadFile(path: string) {
+async function uploadFile(path: string, source: UploadSource) {
+  const normalizedPath = normalizePath(path);
   const toast = await showToast({
     style: Toast.Style.Animated,
     title: "Preparing",
+    message: `${source}: ${basename(normalizedPath)}`,
   });
 
   try {
-    const file = await validateFilePath(path);
+    const file = await validateFilePath(normalizedPath);
     const key = basename(file.path);
     const { bucket, client } = getR2Config();
     let lastPercent = -1;
+
+    toast.title = "0%";
+    toast.message = `Uploading ${key}`;
 
     const upload = new Upload({
       client,
@@ -87,6 +100,7 @@ async function uploadFile(path: string) {
 
       if (percent !== lastPercent) {
         toast.title = `${percent}%`;
+        toast.message = `Uploading ${key}`;
         lastPercent = percent;
       }
     });
@@ -94,6 +108,7 @@ async function uploadFile(path: string) {
     await upload.done();
 
     toast.title = "Processing";
+    toast.message = key;
     await setTimeout(300);
 
     toast.style = Toast.Style.Success;
@@ -103,21 +118,21 @@ async function uploadFile(path: string) {
     return true;
   } catch (error) {
     toast.style = Toast.Style.Failure;
-    toast.title = "Upload Failed";
-    toast.message = getErrorMessage(error);
+    toast.title = getErrorMessage(error).startsWith("Not a") ? getErrorMessage(error) : "Upload Failed";
+    toast.message = getErrorMessage(error).startsWith("Not a") ? source : getErrorMessage(error);
 
     return false;
   }
 }
 
-async function getInitialUploadPath() {
+async function getInitialUpload(): Promise<InitialUpload | undefined> {
   if (process.platform === "darwin") {
     try {
       const selectedItems = await getSelectedFinderItems();
       const selectedItem = selectedItems[0];
 
       if (selectedItem) {
-        return selectedItem.path;
+        return { path: selectedItem.path, source: "Finder" };
       }
     } catch {
       // Fall back to the form when Finder isn't frontmost or doesn't expose a selection.
@@ -132,7 +147,7 @@ async function getInitialUploadPath() {
 
   try {
     await validateFilePath(clipboardPath);
-    return clipboardPath;
+    return { path: clipboardPath, source: "Clipboard" };
   } catch {
     await showToast({
       style: Toast.Style.Failure,
@@ -146,6 +161,8 @@ async function getInitialUploadPath() {
 export default function Command() {
   const didTryInitialUpload = useRef(false);
   const [files, setFiles] = useState<string[]>([]);
+  const [mode, setMode] = useState<UploadMode>("checking");
+  const [statusMessage, setStatusMessage] = useState("Looking for a selected or copied file…");
 
   useEffect(() => {
     if (didTryInitialUpload.current) {
@@ -154,18 +171,25 @@ export default function Command() {
 
     didTryInitialUpload.current = true;
 
-    async function uploadInitialPath() {
-      const path = await getInitialUploadPath();
+    async function uploadInitialFile() {
+      const initialUpload = await getInitialUpload();
 
-      if (!path) {
+      if (!initialUpload) {
+        setMode("manual");
         return;
       }
 
-      setFiles([path]);
-      await uploadFile(path);
+      setFiles([initialUpload.path]);
+      setMode("uploading");
+      setStatusMessage(`Uploading ${initialUpload.path}`);
+
+      const didUpload = await uploadFile(initialUpload.path, initialUpload.source);
+
+      setMode("done");
+      setStatusMessage(didUpload ? "Upload complete." : "Upload failed. Check the toast for details.");
     }
 
-    uploadInitialPath();
+    uploadInitialFile();
   }, []);
 
   async function handleSubmit(values: FormValues) {
@@ -180,7 +204,11 @@ export default function Command() {
       return;
     }
 
-    await uploadFile(path);
+    await uploadFile(path, "File Picker");
+  }
+
+  if (mode !== "manual") {
+    return <Detail isLoading={mode === "checking" || mode === "uploading"} markdown={statusMessage} />;
   }
 
   return (

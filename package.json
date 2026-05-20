@@ -26,7 +26,7 @@
       "title": "Upload File",
       "subtitle": "Upload the selected file in Finder",
       "description": "Upload the selected Finder file to a Cloudflare R2 bucket",
-      "mode": "view"
+      "mode": "no-view"
     }
   ],
   "preferences": [

@@ -3,18 +3,21 @@ import {
   ActionPanel,
   Alert,
   Clipboard,
+  Form,
   Icon,
   List,
   Toast,
   confirmAlert,
   environment,
   showToast,
+  useNavigation,
 } from "@raycast/api";
-import { DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
+import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { usePromise } from "@raycast/utils";
 import { access, mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { useState } from "react";
 import { getR2Config } from "./r2";
 
 type BucketFile = {
@@ -23,8 +26,25 @@ type BucketFile = {
   lastModified?: string;
 };
 
+type RenameFileFormValues = {
+  name: string;
+};
+
 function getFileName(key: string) {
   return key.split("/").filter(Boolean).at(-1) ?? "download";
+}
+
+function getFilePrefix(key: string) {
+  const slashIndex = key.lastIndexOf("/");
+  return slashIndex === -1 ? "" : key.slice(0, slashIndex + 1);
+}
+
+function getRenamedKey(key: string, fileName: string) {
+  return `${getFilePrefix(key)}${fileName.trim()}`;
+}
+
+function getCopySource(bucket: string, key: string) {
+  return `${bucket}/${encodeURIComponent(key).replace(/%2F/g, "/")}`;
 }
 
 async function pathExists(path: string) {
@@ -98,6 +118,43 @@ async function copyFile(key: string) {
     title: "Copied",
     message: getFileName(key),
   });
+}
+
+async function renameFile(key: string, fileName: string) {
+  const newKey = getRenamedKey(key, fileName);
+  const toast = await showToast({
+    style: Toast.Style.Animated,
+    title: "Renaming",
+    message: key,
+  });
+
+  try {
+    const { bucket, client } = getR2Config();
+    await client.send(
+      new CopyObjectCommand({
+        Bucket: bucket,
+        CopySource: getCopySource(bucket, key),
+        Key: newKey,
+      }),
+    );
+    await client.send(
+      new DeleteObjectCommand({
+        Bucket: bucket,
+        Key: key,
+      }),
+    );
+
+    toast.style = Toast.Style.Success;
+    toast.title = "Renamed";
+    toast.message = newKey;
+
+    return newKey;
+  } catch (error) {
+    toast.style = Toast.Style.Failure;
+    toast.title = "Rename Failed";
+    toast.message = error instanceof Error ? error.message : String(error);
+    throw error;
+  }
 }
 
 async function deleteFile(key: string) {
@@ -201,6 +258,65 @@ function formatDate(date?: string) {
   }).format(new Date(date));
 }
 
+function validateRename(key: string, name: string) {
+  const trimmedName = name.trim();
+
+  if (!trimmedName) {
+    return "Enter a file name.";
+  }
+
+  if (trimmedName.includes("/") || trimmedName.includes("\\")) {
+    return "File name can't contain slashes.";
+  }
+
+  if (getRenamedKey(key, trimmedName) === key) {
+    return "Enter a new file name.";
+  }
+}
+
+function RenameFileForm({ file, onRenamed }: { file: BucketFile; onRenamed: () => Promise<unknown> }) {
+  const { pop } = useNavigation();
+  const [name, setName] = useState(getFileName(file.key));
+  const [nameError, setNameError] = useState<string>();
+
+  async function handleSubmit(values: RenameFileFormValues) {
+    const error = validateRename(file.key, values.name);
+
+    if (error) {
+      setNameError(error);
+      return;
+    }
+
+    await renameFile(file.key, values.name);
+    await onRenamed();
+    pop();
+  }
+
+  return (
+    <Form
+      navigationTitle="Rename File"
+      actions={
+        <ActionPanel>
+          <Action.SubmitForm title="Save" icon={Icon.Check} onSubmit={handleSubmit} />
+        </ActionPanel>
+      }
+    >
+      <Form.TextField
+        id="name"
+        title="File Name"
+        value={name}
+        error={nameError}
+        autoFocus
+        onChange={(value) => {
+          setName(value);
+          setNameError(undefined);
+        }}
+        onBlur={(event) => setNameError(validateRename(file.key, event.target.value ?? ""))}
+      />
+    </Form>
+  );
+}
+
 export default function Command() {
   const { data: files = [], isLoading, revalidate } = usePromise(listBucketFiles);
 
@@ -214,13 +330,18 @@ export default function Command() {
           accessories={[{ text: formatBytes(file.size) }, { text: formatDate(file.lastModified) }]}
           actions={
             <ActionPanel>
-              <ActionPanel.Section title="Save">
+              <ActionPanel.Section title="Actions">
                 <Action
                   title="Download"
                   icon={Icon.Download}
                   onAction={() => downloadFile(file.key, join(homedir(), "Downloads"))}
                 />
                 <Action title="Copy" icon={Icon.Clipboard} onAction={() => copyFile(file.key)} />
+                <Action.Push
+                  title="Rename"
+                  icon={Icon.Pencil}
+                  target={<RenameFileForm file={file} onRenamed={revalidate} />}
+                />
               </ActionPanel.Section>
               <ActionPanel.Section title="Danger">
                 <Action
